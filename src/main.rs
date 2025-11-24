@@ -8,11 +8,11 @@ use std::process::Command;
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// Target branch (the one others were merged into), e.g., main or master
-    #[arg(short, long, default_value = "main")]
-    target: String,
+    /// Target branch (e.g. main or master). If not provided, tries to auto-detect.
+    #[arg(short, long)]
+    target: Option<String>,
 
-    /// Dry-run mode (only prints what would be deleted, does not delete anything)
+    /// Dry-run mode
     #[arg(long, default_value_t = false)]
     dry_run: bool,
 }
@@ -20,20 +20,26 @@ struct Args {
 fn main() -> Result<()> {
     let args = Args::parse();
 
+    // 1. Determine target branch (Auto-detect if not provided)
+    let target = match args.target {
+        Some(t) => t,
+        None => detect_default_branch()?,
+    };
+
     println!(
         "{} {} {}",
         "🔍 Searching for branches merged into".blue(),
-        args.target.bold(),
+        target.bold(),
         "..."
     );
 
-    // 1. Git: Fetch list of merged branches
+    // 2. Git: Fetch list of merged branches
     let output = Command::new("git")
         .arg("branch")
         .arg("--merged")
-        .arg(&args.target)
+        .arg(&target)
         .output()
-        .context("Failed to execute git command. Are you in a git repository?")?;
+        .context("Failed to execute git command")?;
 
     if !output.status.success() {
         eprintln!("{}", "Error: Target branch not found or not a git repository.".red());
@@ -42,18 +48,12 @@ fn main() -> Result<()> {
 
     let output_str = String::from_utf8(output.stdout)?;
 
-    // 2. Parsing and filtering
+    // 3. Parsing and filtering
     let branches_to_clean: Vec<String> = output_str
         .lines()
         .map(|line| line.trim().to_string())
-        .filter(|line| {
-            // Ignore the current branch (marked with *)
-            !line.starts_with('*')
-        })
-        .filter(|line| {
-            // Ignore the target branch itself (main/master)
-            line != &args.target
-        })
+        .filter(|line| !line.starts_with('*')) // Ignore current
+        .filter(|line| line != &target)        // Ignore target (main/master)
         .collect();
 
     if branches_to_clean.is_empty() {
@@ -61,13 +61,12 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    // 3. Interactive selection (UI)
+    // 4. Interactive selection (UI)
     println!("Found {} branches to delete:", branches_to_clean.len());
 
     let selections = MultiSelect::with_theme(&ColorfulTheme::default())
         .with_prompt("Space to select/unselect, Enter to confirm")
         .items(&branches_to_clean)
-        // Select all by default
         .defaults(&vec![true; branches_to_clean.len()])
         .interact()?;
 
@@ -76,7 +75,7 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    // 4. Deletion process
+    // 5. Deletion process
     for index in selections {
         let branch_name = &branches_to_clean[index];
 
@@ -94,10 +93,31 @@ fn main() -> Result<()> {
     Ok(())
 }
 
+/// Helper to check if branch exists
+fn branch_exists(name: &str) -> bool {
+    Command::new("git")
+        .args(["rev-parse", "--verify", name])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+/// Logic to find main or master
+fn detect_default_branch() -> Result<String> {
+    if branch_exists("main") {
+        return Ok("main".to_string());
+    }
+    if branch_exists("master") {
+        return Ok("master".to_string());
+    }
+    // Fallback if neither exists (unlikely but possible)
+    Ok("main".to_string())
+}
+
 fn delete_branch(branch_name: &str) -> Result<()> {
     let status = Command::new("git")
         .arg("branch")
-        .arg("-d") // -d is safe (checks merge status), -D forces deletion
+        .arg("-d")
         .arg(branch_name)
         .status()?;
 
