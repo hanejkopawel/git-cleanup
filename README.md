@@ -2,6 +2,13 @@
 
 A simple, safe, and interactive CLI tool written in Rust to clean up local git branches that have already been merged into the main branch.
 
+![Git Kanban Demo](assets/demo1.png)
+
+![Git Kanban Demo](assets/demo2.png)
+
+![Git Kanban Demo](assets/demo3.png)
+
+
 ## Features
 
 - 🔍 **Auto-detection**: Finds branches merged into `main` (or any specified target).
